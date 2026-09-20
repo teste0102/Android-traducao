@@ -7,5 +7,5 @@
     <string name="grant_overlay">1. Permitir botão flutuante</string>
     <string name="start_capture">2. Iniciar captura de áudio</string>
     <string name="stop_service">Parar serviço</string>
-    <string name="howto">Como usar: abra o Instagram, dê play no vídeo em inglês e toque ● Gravar. Toque ■ Parar + Dublar para processar. Depois dê play de novo e toque ▶ Tocar.</string>
+    <string name="howto">Como usar: toque "2. Iniciar captura" e aceite — a gravação começa sozinha. Vá ao Instagram e dê play no vídeo. Quando terminar, toque ■ Parar + Dublar no botão flutuante. Aguarde e toque ▶ Tocar.</string>
 </resources>

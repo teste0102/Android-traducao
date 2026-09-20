@@ -180,6 +180,8 @@ class CaptureService : Service() {
         lp.gravity = Gravity.TOP or Gravity.END
         lp.y = 200
         wm.addView(overlay, lp)
+        // Inicia gravação automaticamente — usuário só precisa ir pro Instagram
+        startRecording()
     }
 
     // ---------- util ----------

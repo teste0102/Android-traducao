@@ -11,7 +11,7 @@
         android:paddingBottom="4dp"/>
     <Button android:id="@+id/ovRec"
         android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="● Gravar" android:textSize="12sp"/>
+        android:text="↺ Regravar" android:textSize="12sp"/>
     <Button android:id="@+id/ovStop"
         android:layout_width="match_parent" android:layout_height="wrap_content"
         android:text="■ Parar + Dublar" android:textSize="12sp"/>
