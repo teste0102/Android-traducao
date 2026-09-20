@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Tradução do Instagram</string>
+    <string name="subtitle">Escuta o áudio em inglês do vídeo e toca a dublagem em português.</string>
+    <string name="server_label">Endereço do servidor</string>
+    <string name="save_server">Salvar servidor</string>
+    <string name="grant_overlay">1. Permitir botão flutuante</string>
+    <string name="start_capture">2. Iniciar captura de áudio</string>
+    <string name="stop_service">Parar serviço</string>
+    <string name="howto">Como usar: abra o Instagram, dê play no vídeo em inglês e toque ● Gravar. Toque ■ Parar + Dublar para processar. Depois dê play de novo e toque ▶ Tocar.</string>
+</resources>

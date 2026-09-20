@@ -1,148 +1,56 @@
-"""Pipeline principal: áudio/vídeo → dublagem PT sincronizada."""
-import os
-import uuid
-from app import config, audio as aud, tts, align, gender as gen, translate as tr
-
-_whisper = None
+"""Orquestra: extrai -> transcreve -> detecta gênero -> traduz -> sintetiza -> alinha."""
+import os, uuid
+from . import config, audio_utils as au, asr, translate, tts, align
 
 
-def _get_whisper():
-    global _whisper
-    if _whisper is None:
-        from faster_whisper import WhisperModel
-        os.makedirs(config.MODELS_DIR, exist_ok=True)
-        _whisper = WhisperModel(
-            config.WHISPER_MODEL,
-            device=config.WHISPER_DEVICE,
-            compute_type=config.WHISPER_COMPUTE,
-            download_root=config.MODELS_DIR,
-        )
-    return _whisper
-
-
-def process(src_path: str) -> dict:
+def process(input_path: str) -> dict:
     job = uuid.uuid4().hex[:8]
-    tmp = config.TMP_DIR
-    os.makedirs(tmp, exist_ok=True)
+    work = os.path.join(config.TMP_DIR, job)
+    os.makedirs(work, exist_ok=True)
 
-    # 1. Extrai WAV 16kHz para o Whisper
-    wav16 = os.path.join(tmp, f"{job}_16k.wav")
-    try:
-        aud.extract_wav(src_path, wav16)
-    except Exception as e:
-        return {"error": str(e), "job": job}
+    # 1) áudio pra análise (mono 16k)
+    wav16 = au.to_wav_mono16k(input_path, os.path.join(work, "src16k.wav"))
+    samples, sr = au.read_wav_float(wav16)
+    total_dur = len(samples) / sr
 
-    duration = aud.get_duration(wav16)
+    # 2) transcrição com timestamps
+    language, segments = asr.transcribe(wav16)
+    if not segments:
+        return {"error": "nenhuma fala detectada", "language": language}
 
-    # 2. Transcreve com timestamps por segmento
-    try:
-        model = _get_whisper()
-        segs_iter, info = model.transcribe(
-            wav16,
-            language="en",
-            word_timestamps=False,
-            vad_filter=True,
-        )
-        segments_raw = list(segs_iter)
-    except Exception as e:
-        return {"error": f"Whisper: {e}", "job": job}
+    # 3) gênero por segmento (a partir do áudio original)
+    for s in segments:
+        a = int(max(0, s["start"]) * sr)
+        b = int(min(total_dur, s["end"]) * sr)
+        s["gender"] = au.gender_of_segment(samples[a:b], sr, config.GENDER_F0_THRESHOLD)
 
-    if not segments_raw:
-        return {"error": "Nenhuma fala detectada no áudio.", "job": job}
+    # 4) tradução (lote com fallback)
+    pt = translate.translate_segments([s["text"] for s in segments])
+    for s, t in zip(segments, pt):
+        s["pt"] = t
 
-    # 3. Para cada segmento: detecta gênero, traduz, sintetiza, alinha
-    seg_wavs = []
-    result_segs = []
-    prev_end = 0.0
+    # 5) TTS por segmento
+    placed = []
+    for i, s in enumerate(segments):
+        out = os.path.join(work, f"seg{i:03d}.wav")
+        tts.synth(s["pt"], s["gender"], out)
+        placed.append({"start": s["start"], "end": s["end"], "wav": out})
 
-    for i, seg in enumerate(segments_raw):
-        start = seg.start
-        end = seg.end
-        text_en = seg.text.strip()
-        slot = end - start
-
-        if slot <= 0 or not text_en:
-            continue
-
-        # silêncio entre segmentos
-        gap = start - prev_end
-        if gap > 0.05:
-            gap_wav = os.path.join(tmp, f"{job}_gap{i}.wav")
-            _silence_wav(gap_wav, gap)
-            seg_wavs.append(gap_wav)
-
-        # gênero
-        gender = gen.detect_gender(wav16, start, end)
-
-        # tradução
-        try:
-            text_pt = tr.translate(text_en)
-        except Exception as e:
-            text_pt = text_en  # fallback: usa o original
-
-        # tts
-        raw_wav = os.path.join(tmp, f"{job}_tts{i}.wav")
-        fit_wav = os.path.join(tmp, f"{job}_fit{i}.wav")
-        try:
-            tts.synthesize(text_pt, gender, raw_wav)
-            align.fit_segment(raw_wav, slot, fit_wav)
-        except Exception as e:
-            _silence_wav(fit_wav, slot)
-
-        seg_wavs.append(fit_wav)
-        prev_end = end
-        result_segs.append({
-            "start": round(start, 2),
-            "end": round(end, 2),
-            "gender": gender,
-            "en": text_en,
-            "pt": text_pt,
-        })
-
-    if not seg_wavs:
-        return {"error": "Nenhum segmento processado.", "job": job}
-
-    # 4. Concatena tudo
-    out_wav = os.path.join(tmp, f"{job}_out.wav")
-    out_mp3 = os.path.join(tmp, f"{job}_out.mp3")
-    try:
-        aud.concat_wav_files(seg_wavs, out_wav)
-        aud.to_mp3(out_wav, out_mp3)
-    except Exception as e:
-        return {"error": f"Concat/MP3: {e}", "job": job}
-
-    # 5. Limpeza de temporários de segmento
-    for p in seg_wavs:
-        try:
-            os.remove(p)
-        except OSError:
-            pass
-    try:
-        os.remove(wav16)
-    except OSError:
-        pass
-
-    tts_mode = "native_female" if (
-        result_segs and result_segs[0]["gender"] == "female"
-        and os.path.exists(os.path.join(config.VOICES_DIR, config.VOICE_FEMALE))
-    ) else "pitch_shift" if any(s["gender"] == "female" for s in result_segs) else "male"
+    # 6) monta trilha final
+    align.config.TMP_DIR = work
+    final_wav = align.build(total_dur, placed)
+    final_mp3 = align.to_mp3(final_wav)
 
     return {
         "job": job,
-        "language": info.language if hasattr(info, "language") else "en",
-        "duration": round(duration, 2),
-        "tts_mode": tts_mode,
-        "segments": result_segs,
-        "audio_wav": out_wav,
-        "audio_mp3": out_mp3,
+        "language": language,
+        "tts_mode": tts.mode(),
+        "duration": round(total_dur, 2),
+        "audio_wav": final_wav,
+        "audio_mp3": final_mp3,
+        "segments": [
+            {"start": round(s["start"], 2), "end": round(s["end"], 2),
+             "gender": s["gender"], "en": s["text"], "pt": s["pt"]}
+            for s in segments
+        ],
     }
-
-
-def _silence_wav(path: str, duration: float, sr: int = 22050) -> None:
-    import wave, struct
-    n = max(1, int(sr * duration))
-    with wave.open(path, "w") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sr)
-        wf.writeframes(struct.pack(f"<{n}h", *([0] * n)))
