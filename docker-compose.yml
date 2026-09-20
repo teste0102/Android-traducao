@@ -1,0 +1,15 @@
+services:
+  traducao-instagram:
+    build: .
+    container_name: traducao-instagram
+    restart: unless-stopped
+    ports:
+      - "7900:7900"
+    env_file:
+      - .env
+    volumes:
+      - ./voices:/app/voices        # vozes do Piper (baixadas 1x)
+      - ./models:/app/models        # cache do Whisper (persiste)
+      - ./tmp:/app/tmp              # trabalho temporário
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # container -> Ollama no host

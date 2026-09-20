@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tradução do Instagram</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #eee; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 2rem 1rem; }
+    h1 { font-size: 1.6rem; margin-bottom: 0.3rem; color: #fff; }
+    p.sub { color: #aaa; font-size: 0.9rem; margin-bottom: 2rem; }
+    .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 2rem; width: 100%; max-width: 560px; }
+    label { display: block; font-size: 0.85rem; color: #bbb; margin-bottom: 0.4rem; }
+    input[type=file] { display: none; }
+    .drop { border: 2px dashed #444; border-radius: 8px; padding: 2.5rem 1rem; text-align: center; cursor: pointer; transition: border-color .2s; }
+    .drop:hover, .drop.over { border-color: #e1306c; color: #e1306c; }
+    .drop span { font-size: 0.95rem; color: #888; }
+    .drop .icon { font-size: 2.5rem; display: block; margin-bottom: 0.5rem; }
+    button { margin-top: 1.5rem; width: 100%; padding: 0.75rem; background: linear-gradient(135deg, #e1306c, #833ab4); border: none; border-radius: 8px; color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer; transition: opacity .2s; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    #status { margin-top: 1rem; font-size: 0.9rem; color: #aaa; text-align: center; min-height: 1.2em; }
+    #result { margin-top: 1.5rem; display: none; }
+    #result h2 { font-size: 1rem; color: #ccc; margin-bottom: 0.8rem; }
+    audio { width: 100%; border-radius: 6px; margin-bottom: 1rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th { background: #222; color: #888; padding: 0.4rem 0.6rem; text-align: left; border-bottom: 1px solid #333; }
+    td { padding: 0.4rem 0.6rem; border-bottom: 1px solid #222; vertical-align: top; }
+    .badge { display: inline-block; padding: 0.1rem 0.45rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .male   { background: #1a3a5c; color: #7ec8f5; }
+    .female { background: #3a1a3a; color: #f5a0d0; }
+    .dl { display: flex; gap: 0.6rem; margin-bottom: 1rem; }
+    .dl a { flex: 1; text-align: center; padding: 0.5rem; border-radius: 6px; background: #222; color: #ccc; text-decoration: none; font-size: 0.85rem; transition: background .2s; }
+    .dl a:hover { background: #333; }
+  </style>
+</head>
+<body>
+  <h1>🎙️ Tradução do Instagram</h1>
+  <p class="sub">Vídeo/áudio em inglês → dublagem em português</p>
+
+  <div class="card">
+    <label>Arquivo (vídeo ou áudio)</label>
+    <div class="drop" id="drop" onclick="document.getElementById('inp').click()">
+      <span class="icon">📂</span>
+      <span id="dropLabel">Clique ou arraste o arquivo aqui</span>
+    </div>
+    <input type="file" id="inp" accept="video/*,audio/*" />
+    <button id="btn" disabled onclick="enviar()">Dublar</button>
+    <div id="status"></div>
+
+    <div id="result">
+      <h2>Resultado</h2>
+      <audio id="player" controls></audio>
+      <div class="dl">
+        <a id="dlMp3" href="#">⬇ MP3</a>
+        <a id="dlWav" href="#">⬇ WAV</a>
+      </div>
+      <table>
+        <thead><tr><th>Tempo</th><th>Gênero</th><th>Inglês</th><th>Português</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const drop = document.getElementById('drop');
+    const inp  = document.getElementById('inp');
+    const btn  = document.getElementById('btn');
+    const lbl  = document.getElementById('dropLabel');
+
+    inp.addEventListener('change', () => setFile(inp.files[0]));
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); setFile(e.dataTransfer.files[0]); });
+
+    function setFile(f) {
+      if (!f) return;
+      inp._file = f;
+      lbl.textContent = f.name + ' (' + (f.size / 1048576).toFixed(1) + ' MB)';
+      btn.disabled = false;
+    }
+
+    function fmt(s) { const m = Math.floor(s/60); return m + ':' + String(Math.floor(s%60)).padStart(2,'0'); }
+
+    async function enviar() {
+      const f = inp._file;
+      if (!f) return;
+      btn.disabled = true;
+      document.getElementById('result').style.display = 'none';
+      document.getElementById('status').textContent = '⏳ Processando… pode demorar 1-2 min';
+
+      const fd = new FormData();
+      fd.append('file', f);
+
+      try {
+        const res = await fetch('/dublar?formato=mp3', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        const audioUrl = data.audio_url;
+        const player = document.getElementById('player');
+        player.src = audioUrl;
+
+        document.getElementById('dlMp3').href = audioUrl + '&download=1';
+        document.getElementById('dlWav').href = audioUrl.replace('fmt=mp3','fmt=wav');
+
+        const tbody = document.getElementById('tbody');
+        tbody.innerHTML = '';
+        (data.segments || []).forEach(s => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${fmt(s.start)}–${fmt(s.end)}</td>
+            <td><span class="badge ${s.gender}">${s.gender==='male'?'♂ Masc':'♀ Fem'}</span></td>
+            <td>${s.en}</td><td>${s.pt}</td>`;
+          tbody.appendChild(tr);
+        });
+
+        document.getElementById('status').textContent =
+          `✅ Pronto — ${data.segments?.length||0} segmentos, ${data.duration}s`;
+        document.getElementById('result').style.display = 'block';
+      } catch(e) {
+        document.getElementById('status').textContent = '❌ Erro: ' + e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
