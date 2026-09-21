@@ -6,3 +6,4 @@ models/*
 voices/*.onnx
 voices/*.json
 !*/.gitkeep
+tradinsta.jks

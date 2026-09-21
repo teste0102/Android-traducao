@@ -14,9 +14,18 @@ android {
         versionCode = 1
         versionName = "1.0"
     }
+    signingConfigs {
+        create("release") {
+            storeFile = file("../../tradinsta.jks")
+            storePassword = "tradinsta2024"
+            keyAlias = "tradinsta"
+            keyPassword = "tradinsta2024"
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
