@@ -1,126 +1,146 @@
 # Tradução do Instagram
 
-Servidor que recebe um vídeo/áudio em inglês e devolve a **dublagem em português**,
+Captura o áudio de vídeos em inglês no Instagram e devolve a **dublagem em português**,
 sincronizada nos tempos originais e **respeitando voz masculina/feminina** (detecção por F0).
-
-Pipeline: `faster-whisper` (transcreve + timestamps) → detecção de gênero por pitch →
-tradução via **Ollama no host** (`qwen3:8b`) → **Piper** (TTS) → alinhamento temporal.
-
-- Roda 100% na sua rede local. GPU **não é obrigatória** (Whisper em CPU int8; Ollama já usa a GPU no host).
-- Porta fixa: **7900** → `http://192.168.15.11:7900`
-- Vozes: masculina = `faber` (oficial). Feminina = arquivo próprio se existir, senão faber com pitch/formant deslocado.
 
 ---
 
-## Instalação (na máquina Linux, user mkinfocell)
+## Arquitetura
 
-Clonar/copiar para dentro do workspace:
-```
-cd ~/ia-workspace && git clone <REPO> traducao-instagram || true
+```mermaid
+flowchart LR
+    subgraph Celular["📱 Samsung S22"]
+        A([Instagram\nvídeo em inglês]) -->|AudioPlaybackCapture| B[App Android\nTradução do Instagram]
+        B -->|WAV 16kHz mono| C{POST /dublar}
+        F([▶ Toca dublagem\nem português]) 
+    end
+
+    subgraph Servidor["🖥️ Servidor 192.168.15.11:7900"]
+        C --> D1[faster-whisper\ntranscreve EN + timestamps]
+        D1 --> D2[Detecção de gênero\npor pitch F0]
+        D2 --> D3[Ollama qwen3:8b\ntraduz EN → PT]
+        D3 --> D4[Piper TTS\nsíntese de voz PT-BR]
+        D4 --> D5[Alinhamento temporal\n+ ffmpeg → MP3]
+    end
+
+    D5 -->|JSON + URL do MP3| B
+    B -->|baixa MP3| F
 ```
 
-Entrar na pasta:
-```
-cd ~/ia-workspace/traducao-instagram
-```
+---
 
-Criar o `.env`:
-```
+## Fluxo de uso
+
+1. Abrir o app → informar IP do servidor (`192.168.15.11:7900`)
+2. Tocar **"2. Iniciar captura"** e aceitar a permissão → gravação começa automaticamente
+3. Ir ao Instagram e dar play no vídeo em inglês
+4. Voltar ao app e tocar **■ Parar + Dublar**
+5. Aguardar o servidor processar (~10–30s)
+6. Tocar **▶ Tocar** — a dublagem em português toca enquanto o vídeo abaixa o volume
+
+---
+
+## Instalação do servidor (Linux, user mkinfocell)
+
+```bash
+cd ~/ia-workspace
+git clone https://github.com/teste0102/Android-traducao.git traducao-instagram
+cd traducao-instagram
 cp .env.example .env
+bash download_models.sh          # baixa voz Piper (1x, ~60 MB)
+sudo docker compose up -d --build
+sudo docker compose logs -f      # acompanhar: Whisper baixa o modelo small na 1ª vez
 ```
 
-Baixar a voz do Piper (faz 1x):
-```
-bash download_models.sh
+Testar:
+```bash
+curl -s http://192.168.15.11:7900/health
+# Página de teste: http://192.168.15.11:7900
 ```
 
-Subir o container (você não está no grupo docker → usa sudo):
-```
+Atualizar após mudanças no código:
+```bash
+cd ~/ia-workspace/traducao-instagram
+git pull
 sudo docker compose up -d --build
 ```
 
-Ver o log da primeira subida (Whisper baixa o modelo `small` na 1ª vez):
-```
-sudo docker compose logs -f
-```
+---
 
-Testar do navegador (do PC ou do celular na mesma rede):
-```
-http://192.168.15.11:7900
-```
+## App Android
 
-Checar saúde por linha de comando:
-```
-curl -s http://192.168.15.11:7900/health
-```
-
-Liberar a porta no firewall (se necessário):
-```
-sudo ufw allow 7900
-```
+- APK de debug disponível em [Releases](../../releases) ou compilar com Android Studio
+- Requer Android 10+ (API 29) — necessário para `AudioPlaybackCapture`
+- Permissões necessárias: captura de mídia, overlay de janela, notificações
 
 ---
 
-## Uso pela API (o app Android usa isto)
+## API
 
-Enviar um arquivo e receber a dublagem:
+### `POST /dublar`
+Envia áudio/vídeo e recebe a dublagem:
+```bash
+curl -s -F "file=@clipe.wav" http://192.168.15.11:7900/dublar
 ```
-curl -s -F "file=@clipe.mp4" http://192.168.15.11:7900/dublar
+Resposta JSON:
+```json
+{
+  "language": "en",
+  "duration": 12.4,
+  "tts_mode": "piper-native",
+  "audio_url": "/audio/abc123?fmt=mp3",
+  "segments": [
+    { "start": 0.0, "end": 3.2, "gender": "male", "en": "Hello", "pt": "Olá" }
+  ]
+}
 ```
 
-Resposta (JSON): `language`, `duration`, `tts_mode`, `segments[]` (com `gender`, `en`, `pt`)
-e `audio_url`. Baixar o áudio dublado:
-```
-curl -sL "http://192.168.15.11:7900/audio/<job>?fmt=mp3" -o dublagem.mp3
-```
+### `GET /audio/{job}?fmt=mp3`
+Baixa o arquivo de áudio dublado.
 
----
-
-## Trocar a voz feminina por uma nativa (fase 2, opcional)
-
-Coloque um par no formato Piper/VITS e o servidor passa a usá-lo sozinho:
-```
-cp minha_voz_feminina.onnx      voices/female.onnx
-```
-```
-cp minha_voz_feminina.onnx.json voices/female.onnx.json
-```
-```
-sudo docker compose restart
-```
+### `GET /health`
+Verifica se o servidor está no ar.
 
 ---
 
-## Ligar a GPU no Whisper (opcional, se instalar nvidia-container-toolkit)
+## Variáveis de ambiente (.env)
 
-No `.env`:
-```
-WHISPER_DEVICE=cuda
-WHISPER_COMPUTE=float16
-```
-E no `docker-compose.yml` adicione ao serviço:
-```
-    gpus: all
-```
-
----
-
-## Integrar na central 7000
-
-Adicione uma linha na seção "Serviços Docker" apontando para
-`http://192.168.15.11:7900` (nome: "Tradução Instagram"), no mesmo padrão dos outros.
-
----
-
-## Variáveis (.env)
-
-| Variável | Default | O que faz |
+| Variável | Padrão | Descrição |
 |---|---|---|
-| PORT | 7900 | porta do servidor |
-| WHISPER_MODEL | small | tamanho do modelo (tiny/base/small/medium) |
-| WHISPER_DEVICE | cpu | cpu ou cuda |
+| PORT | 7900 | Porta do servidor |
+| WHISPER_MODEL | small | Tamanho do modelo (tiny/base/small/medium) |
+| WHISPER_DEVICE | cpu | `cpu` ou `cuda` |
 | OLLAMA_URL | http://host.docker.internal:11434 | Ollama no host |
-| OLLAMA_MODEL | qwen3:8b | modelo tradutor |
-| GENDER_F0_THRESHOLD | 165 | Hz: abaixo=masc, acima=fem |
-| FEMALE_PITCH_FALLBACK | 3.5 | semitons pra voz feminina por shift |
-| MAX_SPEEDUP | 1.6 | aceleração máx. pra encaixar fala longa |
+| OLLAMA_MODEL | qwen3:8b | Modelo tradutor |
+| GENDER_F0_THRESHOLD | 165 | Hz: abaixo=masculino, acima=feminino |
+| FEMALE_PITCH_FALLBACK | 3.5 | Semitons para voz feminina por pitch-shift |
+| MAX_SPEEDUP | 1.6 | Aceleração máxima para encaixar fala longa |
+
+---
+
+## Pipeline de processamento
+
+```
+Áudio EN (WAV)
+    │
+    ▼
+faster-whisper ──► segmentos com timestamps + idioma detectado
+    │
+    ▼
+Detecção de gênero por F0 (autocorrelação, threshold 165 Hz)
+    │
+    ├── masculino → Piper faber-medium
+    └── feminino  → Piper female.onnx (ou faber + pitch-shift +3.5 st)
+    │
+    ▼
+Ollama qwen3:8b ──► tradução EN→PT em lote (numerada)
+    │
+    ▼
+Piper TTS ──► síntese de voz PT-BR por segmento
+    │
+    ▼
+Alinhamento temporal (numpy float32, atempo até 1.6×)
+    │
+    ▼
+ffmpeg ──► MP3 final
+```
